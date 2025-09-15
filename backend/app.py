@@ -1,0 +1,334 @@
+import os
+import uuid
+import logging
+from datetime import datetime
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from flask_migrate import Migrate
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+from config import config
+from models import db, Order, InvitationLog, Package
+from utils.validators import validate_order_data
+from utils.payment_gateway import get_payment_gateway
+from utils.email_service import send_payment_confirmation, send_admin_notification
+from tasks import make_celery
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def create_app(config_name=None):
+    """Application factory"""
+    app = Flask(__name__)
+    
+    # Load configuration
+    config_name = config_name or os.environ.get('FLASK_ENV', 'development')
+    app.config.from_object(config[config_name])
+    
+    # Initialize extensions
+    db.init_app(app)
+    migrate = Migrate(app, db)
+    
+    # Configure CORS
+    CORS(app, origins=["http://localhost:3000", "http://localhost:5173"])
+    
+    # Configure rate limiting
+    limiter = Limiter(
+        app,
+        key_func=get_remote_address,
+        storage_uri=app.config.get('RATELIMIT_STORAGE_URL')
+    )
+    
+    # Initialize Celery
+    celery = make_celery(app)
+    
+    # Import tasks after celery initialization
+    from tasks import process_invitation_task
+    
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        """Health check endpoint"""
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.utcnow().isoformat(),
+            'version': '1.0.0'
+        })
+    
+    @app.route('/api/orders', methods=['POST'])
+    @limiter.limit("10 per minute")
+    def create_order():
+        """Create new order and initiate payment"""
+        try:
+            # Get request data
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No data provided'}), 400
+            
+            # Validate input data
+            is_valid, errors, validated_data = validate_order_data(data)
+            if not is_valid:
+                return jsonify({'error': 'Validation failed', 'details': errors}), 400
+            
+            # Generate unique order ID
+            order_id = f"ORD{uuid.uuid4().hex[:8].upper()}"
+            
+            # Get package information
+            packages = app.config['PACKAGES']
+            package = packages.get(validated_data['package_id'])
+            
+            if not package:
+                return jsonify({'error': 'Invalid package_id'}), 400
+            
+            # Create order record
+            order = Order(
+                order_id=order_id,
+                customer_email=validated_data['customer_email'],
+                full_name=validated_data.get('full_name'),
+                phone_number=validated_data.get('phone_number'),
+                package_id=validated_data['package_id'],
+                amount=package['price'],
+                payment_status='pending',
+                invitation_status='pending'
+            )
+            
+            db.session.add(order)
+            db.session.flush()  # Get the ID without committing
+            
+            # Create payment transaction
+            payment_gateway = get_payment_gateway()
+            payment_data = {
+                'order_id': order_id,
+                'customer_email': validated_data['customer_email'],
+                'full_name': validated_data.get('full_name'),
+                'phone_number': validated_data.get('phone_number'),
+                'package_id': validated_data['package_id']
+            }
+            
+            payment_result = payment_gateway.create_transaction(payment_data)
+            
+            if not payment_result['success']:
+                db.session.rollback()
+                logger.error(f"Payment gateway error: {payment_result['error']}")
+                return jsonify({'error': 'Payment gateway error'}), 500
+            
+            # Update order with payment gateway reference
+            order.payment_gateway_ref_id = payment_result['transaction_id']
+            
+            db.session.commit()
+            
+            logger.info(f"Order created successfully: {order_id}")
+            
+            return jsonify({
+                'order_id': order_id,
+                'payment_url': payment_result['payment_url'],
+                'status': 'pending_payment'
+            }), 201
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error creating order: {str(e)}")
+            return jsonify({'error': 'Internal server error'}), 500
+    
+    @app.route('/api/orders/<order_id>/status', methods=['GET'])
+    @limiter.limit("30 per minute")
+    def get_order_status(order_id):
+        """Get order status"""
+        try:
+            order = Order.query.filter_by(order_id=order_id).first()
+            
+            if not order:
+                return jsonify({'error': 'Order not found'}), 404
+            
+            # Generate status message
+            message = generate_status_message(order)
+            
+            return jsonify({
+                'order_id': order.order_id,
+                'payment_status': order.payment_status,
+                'invitation_status': order.invitation_status,
+                'message': message
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting order status: {str(e)}")
+            return jsonify({'error': 'Internal server error'}), 500
+    
+    @app.route('/api/payment/webhook', methods=['POST'])
+    def payment_webhook():
+        """Handle payment gateway webhook"""
+        try:
+            # Get webhook data
+            webhook_data = request.get_json()
+            if not webhook_data:
+                logger.error("No webhook data received")
+                return jsonify({'error': 'No data'}), 400
+            
+            # Verify webhook signature
+            payment_gateway = get_payment_gateway()
+            
+            order_id = webhook_data.get('order_id')
+            status_code = webhook_data.get('status_code')
+            gross_amount = webhook_data.get('gross_amount')
+            signature_key = webhook_data.get('signature_key')
+            
+            if not all([order_id, status_code, gross_amount, signature_key]):
+                logger.error("Missing required webhook fields")
+                return jsonify({'error': 'Missing required fields'}), 400
+            
+            # Verify signature
+            if not payment_gateway.verify_webhook_signature(order_id, status_code, gross_amount, signature_key):
+                logger.error(f"Invalid webhook signature for order {order_id}")
+                return jsonify({'error': 'Invalid signature'}), 401
+            
+            # Find order
+            order = Order.query.filter_by(order_id=order_id).first()
+            if not order:
+                logger.error(f"Order not found: {order_id}")
+                return jsonify({'error': 'Order not found'}), 404
+            
+            # Parse payment status
+            new_status = payment_gateway.parse_webhook_status(webhook_data)
+            old_status = order.payment_status
+            
+            # Update order status
+            order.payment_status = new_status
+            order.updated_at = datetime.utcnow()
+            
+            # If payment is successful, trigger invitation process
+            if new_status == 'paid' and old_status != 'paid':
+                order.invitation_status = 'processing'
+                
+                # Send payment confirmation email
+                try:
+                    send_payment_confirmation(order)
+                except Exception as e:
+                    logger.error(f"Failed to send payment confirmation: {str(e)}")
+                
+                # Trigger invitation task
+                try:
+                    process_invitation_task.delay(order.id)
+                    logger.info(f"Invitation task queued for order {order_id}")
+                except Exception as e:
+                    logger.error(f"Failed to queue invitation task: {str(e)}")
+                    order.invitation_status = 'failed'
+            
+            db.session.commit()
+            
+            logger.info(f"Webhook processed successfully for order {order_id}: {old_status} -> {new_status}")
+            
+            return jsonify({'status': 'success'}), 200
+            
+        except Exception as e:
+            logger.error(f"Webhook processing error: {str(e)}")
+            return jsonify({'error': 'Internal server error'}), 500
+    
+    @app.route('/api/packages', methods=['GET'])
+    def get_packages():
+        """Get available packages"""
+        try:
+            packages = app.config['PACKAGES']
+            return jsonify({'packages': packages})
+        except Exception as e:
+            logger.error(f"Error getting packages: {str(e)}")
+            return jsonify({'error': 'Internal server error'}), 500
+    
+    @app.route('/api/admin/orders', methods=['GET'])
+    @limiter.limit("100 per hour")
+    def admin_get_orders():
+        """Admin endpoint to get orders (basic implementation)"""
+        try:
+            # In production, add proper authentication here
+            page = request.args.get('page', 1, type=int)
+            per_page = min(request.args.get('per_page', 20, type=int), 100)
+            
+            orders = Order.query.order_by(Order.created_at.desc()).paginate(
+                page=page, per_page=per_page, error_out=False
+            )
+            
+            return jsonify({
+                'orders': [order.to_dict() for order in orders.items],
+                'total': orders.total,
+                'pages': orders.pages,
+                'current_page': page
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting admin orders: {str(e)}")
+            return jsonify({'error': 'Internal server error'}), 500
+    
+    def generate_status_message(order):
+        """Generate human-readable status message"""
+        if order.payment_status == 'pending':
+            return "Menunggu pembayaran. Silakan selesaikan pembayaran sesuai instruksi."
+        elif order.payment_status == 'failed':
+            return "Pembayaran gagal. Silakan coba lagi atau hubungi support."
+        elif order.payment_status == 'expired':
+            return "Pembayaran kedaluwarsa. Silakan buat pesanan baru."
+        elif order.payment_status == 'paid':
+            if order.invitation_status == 'pending':
+                return "Pembayaran berhasil. Proses undangan akan segera dimulai."
+            elif order.invitation_status == 'processing':
+                return "Pembayaran berhasil. Undangan sedang diproses dan akan dikirim dalam 5-30 menit."
+            elif order.invitation_status == 'sent':
+                return f"Undangan ChatGPT Plus telah dikirim ke {order.customer_email}. Silakan cek inbox dan spam folder."
+            elif order.invitation_status == 'failed':
+                return "Pembayaran berhasil, namun ada kendala dalam pengiriman undangan. Tim support akan menghubungi Anda."
+            elif order.invitation_status == 'manual_review_required':
+                return "Pembayaran berhasil. Undangan memerlukan review manual. Tim support akan menghubungi Anda segera."
+        
+        return "Status tidak diketahui. Silakan hubungi support."
+    
+    @app.errorhandler(404)
+    def not_found(error):
+        return jsonify({'error': 'Endpoint not found'}), 404
+    
+    @app.errorhandler(405)
+    def method_not_allowed(error):
+        return jsonify({'error': 'Method not allowed'}), 405
+    
+    @app.errorhandler(429)
+    def ratelimit_handler(e):
+        return jsonify({'error': 'Rate limit exceeded', 'message': str(e.description)}), 429
+    
+    @app.errorhandler(500)
+    def internal_error(error):
+        db.session.rollback()
+        return jsonify({'error': 'Internal server error'}), 500
+    
+    return app
+
+def init_database(app):
+    """Initialize database with default data"""
+    with app.app_context():
+        db.create_all()
+        
+        # Add default packages if they don't exist
+        packages_config = app.config['PACKAGES']
+        for package_id, package_data in packages_config.items():
+            existing_package = Package.query.get(package_id)
+            if not existing_package:
+                package = Package(
+                    id=package_id,
+                    name=package_data['name'],
+                    price=package_data['price'],
+                    duration=package_data['duration'],
+                    description=package_data['description']
+                )
+                db.session.add(package)
+        
+        db.session.commit()
+        logger.info("Database initialized successfully")
+
+if __name__ == '__main__':
+    app = create_app()
+    
+    # Initialize database
+    init_database(app)
+    
+    # Run development server
+    app.run(host='0.0.0.0', port=5000, debug=True)
