@@ -1,26 +1,31 @@
 # ChatGPT Plus Order System - Backend
 
-Backend sistem untuk mengelola order dan otomatisasi invite ChatGPT Plus menggunakan Flask, PostgreSQL, Celery, dan Selenium.
+Backend sistem untuk mengelola order dan otomatisasi invite ChatGPT Plus menggunakan Flask, PostgreSQL, Celery, dan Selenium dengan dukungan multi-akun ChatGPT dan integrasi Tripay payment gateway.
 
 ## 🚀 Fitur Utama
 
 - **Order Management**: API untuk membuat dan mengelola order
-- **Payment Integration**: Integrasi dengan Midtrans payment gateway
-- **Automated Invitations**: Otomatisasi invite ChatGPT Team menggunakan Selenium
+- **Tripay Payment Integration**: Integrasi dengan Tripay payment gateway (utama)
+- **Midtrans Support**: Dukungan legacy Midtrans untuk migrasi
+- **Multi-Account ChatGPT Management**: Sistem manajemen pool akun ChatGPT dengan alokasi otomatis
+- **Automated Account Assignment**: Otomatisasi assignment akun ChatGPT ke customer
+- **Account Pool Management**: CRUD dan monitoring akun ChatGPT
 - **Asynchronous Processing**: Background tasks dengan Celery dan Redis
-- **Email Notifications**: Konfirmasi pembayaran dan invite menggunakan SendGrid
-- **Admin Notifications**: Notifikasi ke admin untuk manual review
+- **Email Notifications**: Konfirmasi pembayaran dan notifikasi akun
+- **Admin Panel**: Interface admin untuk mengelola akun dan assignment
+- **Audit Logging**: Logging aktivitas sistem untuk compliance
 - **Rate Limiting**: Proteksi API dari abuse
-- **Comprehensive Logging**: Logging detail untuk debugging dan monitoring
+- **Comprehensive Testing**: Unit tests untuk komponen utama
 
 ## 🛠️ Teknologi
 
 - **Framework**: Flask 2.3.3
 - **Database**: PostgreSQL dengan SQLAlchemy ORM
 - **Task Queue**: Celery dengan Redis broker
-- **Automation**: Selenium WebDriver dengan Chrome
-- **Payment**: Midtrans payment gateway
+- **Payment Gateway**: Tripay (utama), Midtrans (legacy)
 - **Email**: SendGrid API
+- **Security**: HMAC signature verification
+- **Testing**: pytest dengan mocking
 - **Containerization**: Docker & Docker Compose
 
 ## 📋 Prerequisites
@@ -79,7 +84,14 @@ DATABASE_URL=postgresql://username:password@localhost:5432/chatgpt_orders
 # Flask
 SECRET_KEY=your-secret-key-here
 
-# Midtrans Payment Gateway
+# Tripay Payment Gateway (Primary)
+TRIPAY_BASE_URL=https://tripay.co.id/api-sandbox/
+TRIPAY_MERCHANT_CODE=your-merchant-code
+TRIPAY_API_KEY=your-api-key
+TRIPAY_PRIVATE_KEY=your-private-key
+TRIPAY_CALLBACK_URL=https://aksesgptmurah.tech/callback/tripay
+
+# Midtrans Payment Gateway (Legacy/Fallback)
 MIDTRANS_SERVER_KEY=your-midtrans-server-key
 MIDTRANS_CLIENT_KEY=your-midtrans-client-key
 MIDTRANS_IS_PRODUCTION=false
@@ -154,18 +166,18 @@ docker-compose down
 
 ## 📚 API Documentation
 
-### Endpoints
+### Payment Endpoints
 
-#### 1. Create Order
-```http
-POST /api/orders
-Content-Type: application/json
+#### POST /api/orders
+Membuat order baru dan inisiasi pembayaran (menggunakan Tripay)
 
+**Request Body:**
+```json
 {
-  "customer_email": "user@example.com",
-  "package_id": "chatgpt_plus_1_month",
-  "full_name": "John Doe",
-  "phone_number": "+6281234567890"
+  "customer_email": "customer@example.com",
+  "full_name": "Customer Name",
+  "phone_number": "081234567890",
+  "package_id": "chatgpt_plus_1_month"
 }
 ```
 
@@ -173,56 +185,174 @@ Content-Type: application/json
 ```json
 {
   "order_id": "ORD12345678",
-  "payment_url": "https://app.sandbox.midtrans.com/snap/v2/vtweb/...",
+  "payment_url": "https://tripay.co.id/checkout/TP1234567890",
   "status": "pending_payment"
 }
 ```
 
-#### 2. Get Order Status
-```http
-GET /api/orders/{order_id}/status
+#### POST /callback/tripay
+Webhook endpoint untuk menerima notifikasi pembayaran dari Tripay
+
+**Headers:**
+- `X-Callback-Event`: payment_status
+- `X-Callback-Signature`: HMAC SHA256 signature
+
+**Request Body:**
+```json
+{
+  "reference": "TP1234567890",
+  "merchant_ref": "ORD-12345678-abcd1234",
+  "status": "PAID",
+  "payment_method": "QRIS",
+  "amount": 99000,
+  "paid_at": 1699999999
+}
 ```
+
+#### GET /api/orders/{order_id}/status
+Mendapatkan status order
 
 **Response:**
 ```json
 {
   "order_id": "ORD12345678",
   "payment_status": "paid",
-  "invitation_status": "sent",
-  "message": "Undangan ChatGPT Plus telah dikirim ke user@example.com"
+  "invitation_status": "account_assigned",
+  "message": "Akun ChatGPT telah dialokasikan dan siap digunakan"
 }
 ```
 
-#### 3. Payment Webhook
-```http
-POST /api/payment/webhook
-Content-Type: application/json
+### Admin Account Management Endpoints
 
+#### GET /api/admin/chatgpt-accounts
+Mendapatkan daftar akun ChatGPT
+
+**Query Parameters:**
+- `page`: Halaman (default: 1)
+- `per_page`: Item per halaman (max: 100)
+- `status`: Filter berdasarkan status (AVAILABLE, ASSIGNED, SUSPENDED)
+
+**Response:**
+```json
 {
-  "order_id": "ORD12345678",
-  "status_code": "200",
-  "gross_amount": "250000.00",
-  "signature_key": "..."
+  "accounts": [
+    {
+      "id": 1,
+      "email": "account1@chatgpt.com",
+      "status": "AVAILABLE",
+      "max_seats": null,
+      "current_seats_used": 0,
+      "note": "Primary account",
+      "created_at": "2024-01-15T10:00:00"
+    }
+  ],
+  "total": 10,
+  "pages": 1,
+  "current_page": 1
 }
 ```
 
-#### 4. Health Check
-```http
-GET /health
+#### POST /api/admin/chatgpt-accounts
+Membuat akun ChatGPT baru
+
+**Request Body:**
+```json
+{
+  "email": "newaccount@chatgpt.com",
+  "note": "New account for testing",
+  "status": "AVAILABLE",
+  "max_seats": 5
+}
 ```
 
-#### 5. Get Packages
-```http
-GET /api/packages
+#### PUT /api/admin/chatgpt-accounts/{account_id}
+Update akun ChatGPT
+
+**Request Body:**
+```json
+{
+  "note": "Updated note",
+  "status": "SUSPENDED",
+  "max_seats": 3
+}
 ```
+
+#### GET /api/admin/account-assignments
+Mendapatkan daftar assignment akun
+
+**Query Parameters:**
+- `page`: Halaman
+- `per_page`: Item per halaman
+- `status`: Filter status (ACTIVE, ENDED, REVOKED)
+- `user_id`: Filter berdasarkan user email
+
+#### POST /api/admin/account-assignments/{assignment_id}/extend
+Perpanjang assignment
+
+**Request Body:**
+```json
+{
+  "additional_days": 30
+}
+```
+
+#### POST /api/admin/account-assignments/{assignment_id}/revoke
+Cabut assignment
+
+**Request Body:**
+```json
+{
+  "reason": "Customer refund"
+}
+```
+
+#### GET /api/admin/audit-logs
+Mendapatkan audit logs
+
+### Legacy Endpoints (Midtrans)
+
+#### POST /api/payment/webhook
+Legacy webhook untuk Midtrans
 
 ## 🔄 Workflow
+
+### New Tripay-based Workflow (Default)
+
+1. **Order Creation**: Frontend mengirim data order ke `/api/orders`
+2. **Payment Processing**: Sistem membuat transaksi di Tripay dan mengembalikan checkout URL
+3. **Payment Webhook**: Tripay mengirim callback ke `/callback/tripay` dengan status pembayaran
+4. **Account Allocation**: Jika pembayaran sukses, sistem mengalokasikan akun ChatGPT dari pool
+5. **Assignment Management**: Sistem membuat assignment dan mengatur durasi akses
+6. **Email Notifications**: Sistem mengirim konfirmasi dengan detail akun ke customer
+7. **Auto Cleanup**: Cron job otomatis release akun yang expired
+
+### Legacy Midtrans Workflow (Fallback)
 
 1. **Order Creation**: Frontend mengirim data order ke `/api/orders`
 2. **Payment Processing**: Sistem membuat transaksi di Midtrans dan mengembalikan payment URL
 3. **Payment Webhook**: Midtrans mengirim notifikasi status pembayaran
 4. **Invitation Processing**: Jika pembayaran sukses, Celery task memproses invite otomatis
 5. **Email Notifications**: Sistem mengirim konfirmasi ke customer dan notifikasi ke admin
+
+## 🏗️ Multi-Account Architecture
+
+### ChatGPT Account Pool
+- **Pool Management**: Admin dapat menambah/edit akun ChatGPT ke pool
+- **Status Tracking**: AVAILABLE, ASSIGNED, SUSPENDED
+- **Seat Management**: Dukungan single-user dan multi-seat accounts
+- **Automatic Allocation**: Sistem otomatis pilih akun available saat payment PAID
+
+### Account Assignment
+- **Duration-based**: Assignment dengan tanggal mulai dan berakhir
+- **Status Tracking**: ACTIVE, ENDED, REVOKED
+- **Audit Trail**: Log semua aktivitas assignment
+- **Admin Controls**: Extend, revoke, atau reassign akun
+
+### Security & Compliance
+- **HMAC Verification**: Semua webhook Tripay diverifikasi dengan HMAC SHA256
+- **Idempotent Processing**: Callback yang sama tidak diproses ulang
+- **Audit Logging**: Semua aktivitas tercatat untuk compliance
+- **Data Masking**: Sensitive data di-mask dalam logs
 
 ## 🤖 Selenium Automation
 
