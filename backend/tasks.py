@@ -3,9 +3,10 @@ import logging
 from datetime import datetime, timedelta
 from celery import Celery
 from flask import current_app
-from models import db, Order, InvitationLog
+from models import db, Order, InvitationLog, ChatGPTAccount, AccountAssignment
 from automation.chatgpt_inviter import create_inviter
 from utils.email_service import send_invitation_confirmation, send_admin_notification
+from services.account_allocator import AccountAllocator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -251,6 +252,25 @@ def retry_failed_invitations():
         logger.error(f"Error during retry process: {str(e)}")
         return {'success': False, 'error': str(e)}
 
+@celery.task
+def cleanup_expired_account_assignments():
+    """Cleanup expired account assignments"""
+    try:
+        logger.info("Starting cleanup of expired account assignments")
+        
+        result = AccountAllocator.cleanup_expired_assignments()
+        
+        if result['success']:
+            logger.info(f"Cleanup completed successfully: {result['released_count']} assignments released out of {result['total_expired']} expired")
+            return result
+        else:
+            logger.error(f"Cleanup failed: {result['error']}")
+            return result
+            
+    except Exception as e:
+        logger.error(f"Error in cleanup_expired_account_assignments task: {str(e)}")
+        return {'success': False, 'error': str(e)}
+
 # Periodic tasks configuration
 @celery.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
@@ -268,4 +288,11 @@ def setup_periodic_tasks(sender, **kwargs):
         7200.0,  # 2 hours
         retry_failed_invitations.s(),
         name='retry failed invitations'
+    )
+    
+    # Cleanup expired account assignments every hour
+    sender.add_periodic_task(
+        3600.0,  # 1 hour
+        cleanup_expired_account_assignments.s(),
+        name='cleanup expired account assignments'
     )

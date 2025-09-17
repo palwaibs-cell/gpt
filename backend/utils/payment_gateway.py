@@ -4,6 +4,8 @@ import hmac
 from datetime import datetime
 from flask import current_app
 import midtransclient
+from .tripay_client import get_tripay_client
+
 
 class MidtransPaymentGateway:
     def __init__(self):
@@ -142,6 +144,60 @@ class MidtransPaymentGateway:
         else:
             return 'unknown'
 
+
+class TripayPaymentGateway:
+    """Wrapper for Tripay payment gateway"""
+    
+    def __init__(self):
+        self.client = get_tripay_client()
+    
+    def create_transaction(self, order_data):
+        """Create payment transaction using Tripay"""
+        result = self.client.create_transaction(order_data)
+        
+        if result['success']:
+            return {
+                'success': True,
+                'payment_url': result['checkout_url'],
+                'transaction_id': result['reference'],
+                'reference': result['reference'],
+                'merchant_ref': result['merchant_ref'],
+                'expired_time': result['expired_time']
+            }
+        else:
+            return result
+    
+    def get_transaction_status(self, reference):
+        """Get transaction status from Tripay"""
+        return self.client.get_transaction_detail(reference)
+    
+    def verify_webhook_signature(self, reference, signature_key):
+        """Verify webhook signature from Tripay (simplified signature)"""
+        return self.client.verify_callback_signature(reference, signature_key)
+    
+    def parse_webhook_status(self, webhook_data):
+        """Parse webhook data and return standardized status"""
+        return self.client.parse_callback_status(webhook_data)
+
+
 def get_payment_gateway():
     """Factory function to get payment gateway instance"""
-    return MidtransPaymentGateway()
+    # Use Tripay as default, fallback to Midtrans if Tripay config is missing
+    try:
+        tripay_config = [
+            current_app.config.get('TRIPAY_MERCHANT_CODE'),
+            current_app.config.get('TRIPAY_API_KEY'), 
+            current_app.config.get('TRIPAY_PRIVATE_KEY')
+        ]
+        
+        if all(tripay_config):
+            current_app.logger.info("Using Tripay payment gateway")
+            return TripayPaymentGateway()
+        else:
+            current_app.logger.info("Tripay config incomplete, falling back to Midtrans")
+            return MidtransPaymentGateway()
+            
+    except Exception as e:
+        current_app.logger.error(f"Error initializing payment gateway: {str(e)}")
+        # Fallback to Midtrans
+        return MidtransPaymentGateway()

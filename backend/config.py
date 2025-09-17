@@ -12,7 +12,14 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///chatgpt_orders.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # Payment Gateway (Midtrans)
+    # Payment Gateway (Tripay)
+    TRIPAY_BASE_URL = os.environ.get('TRIPAY_BASE_URL') or 'https://tripay.co.id/api-sandbox/'
+    TRIPAY_MERCHANT_CODE = os.environ.get('TRIPAY_MERCHANT_CODE')
+    TRIPAY_API_KEY = os.environ.get('TRIPAY_API_KEY')
+    TRIPAY_PRIVATE_KEY = os.environ.get('TRIPAY_PRIVATE_KEY')
+    TRIPAY_CALLBACK_URL = os.environ.get('TRIPAY_CALLBACK_URL') or 'https://aksesgptmurah.tech/callback/tripay'
+    
+    # Legacy Midtrans support (for migration)
     MIDTRANS_SERVER_KEY = os.environ.get('MIDTRANS_SERVER_KEY')
     MIDTRANS_CLIENT_KEY = os.environ.get('MIDTRANS_CLIENT_KEY')
     MIDTRANS_IS_PRODUCTION = os.environ.get('MIDTRANS_IS_PRODUCTION', 'false').lower() == 'true'
