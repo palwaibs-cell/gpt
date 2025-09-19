@@ -281,8 +281,35 @@ npm run docker:logs     # View logs
 Set environment variables untuk debugging:
 ```env
 FLASK_ENV=development
+EMAIL_ENABLED=false
 SELENIUM_HEADLESS=false
-VITE_API_URL=http://localhost:5000
+```
+
+## 🧪 Testing Endpoints
+
+### Test Order Creation
+```bash
+curl -X POST http://151.240.0.79/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "customer_email": "test@example.com",
+    "package_id": "chatgpt_plus_1_month",
+    "full_name": "Test User",
+    "phone_number": "+6281234567890"
+  }'
+```
+
+### Test Callback (for testing)
+```bash
+curl -X POST http://151.240.0.79/callback/tripay \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_ref": "ORD00000001",
+    "reference": "TF123456789",
+    "status": "PAID",
+    "total_amount": 25000,
+    "signature": "calculated_signature"
+  }'
 ```
 
 ## 📞 Support

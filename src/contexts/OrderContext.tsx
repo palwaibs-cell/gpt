@@ -23,7 +23,8 @@ interface OrderState {
   orderData: Partial<OrderData>;
   currentOrder: {
     order_id: string;
-    payment_url: string;
+    checkout_url: string;
+    reference: string;
     status: string;
   } | null;
   isLoading: boolean;

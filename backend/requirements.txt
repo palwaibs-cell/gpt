@@ -7,10 +7,10 @@ Flask-Limiter==3.5.0
 
 # Database
 psycopg2-binary==2.9.7
+PyMySQL==1.1.0
 SQLAlchemy==2.0.21
 
 # Payment Gateway (Midtrans)
-midtransclient==1.4.0
 
 # Selenium for automation
 selenium==4.15.2

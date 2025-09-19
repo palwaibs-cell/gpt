@@ -9,13 +9,22 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
     
     # Database Configuration
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///chatgpt_orders.db'
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'mysql+pymysql://gptuser:GptUser123!@127.0.0.1/gptapp_db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # Payment Gateway (Midtrans)
-    MIDTRANS_SERVER_KEY = os.environ.get('MIDTRANS_SERVER_KEY')
-    MIDTRANS_CLIENT_KEY = os.environ.get('MIDTRANS_CLIENT_KEY')
-    MIDTRANS_IS_PRODUCTION = os.environ.get('MIDTRANS_IS_PRODUCTION', 'false').lower() == 'true'
+    # Payment Gateway (Tripay)
+    TRIPAY_API_KEY = os.environ.get('TRIPAY_API_KEY')
+    TRIPAY_MERCHANT_CODE = os.environ.get('TRIPAY_MERCHANT_CODE')
+    TRIPAY_PRIVATE_KEY = os.environ.get('TRIPAY_PRIVATE_KEY')
+    TRIPAY_IS_PRODUCTION = os.environ.get('TRIPAY_IS_PRODUCTION', 'false').lower() == 'true'
+    
+    # API Configuration
+    API_BASE_URL = os.environ.get('API_BASE_URL', 'http://localhost:5000')
+    TRIPAY_CALLBACK_PATH = os.environ.get('TRIPAY_CALLBACK_PATH', '/callback/tripay')
+    FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+    
+    # CORS Configuration
+    ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
     
     # ChatGPT Admin Credentials
     CHATGPT_ADMIN_EMAIL = os.environ.get('CHATGPT_ADMIN_EMAIL')
@@ -39,6 +48,9 @@ class Config:
     SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
     FROM_EMAIL = os.environ.get('FROM_EMAIL') or 'noreply@yourdomain.com'
     
+    # Email Configuration
+    EMAIL_ENABLED = os.environ.get('EMAIL_ENABLED', 'false').lower() == 'true'
+    
     # Admin Notifications
     ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL')
     ADMIN_TELEGRAM_BOT_TOKEN = os.environ.get('ADMIN_TELEGRAM_BOT_TOKEN')
@@ -61,13 +73,13 @@ class Config:
     PACKAGES = {
         'chatgpt_plus_1_month': {
             'name': 'Individual Plan',
-            'price': 250000,
+            'price': 25000,
             'duration': '1 Bulan',
             'description': 'Akses GPT-4 Unlimited dengan email pribadi sebagai Member'
         },
         'team_package': {
             'name': 'Team Plan',
-            'price': 800000,
+            'price': 95000,
             'duration': '1 Bulan',
             'description': 'Sampai 5 akun tim sebagai Member dengan akses penuh'
         }

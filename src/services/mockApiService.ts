@@ -52,11 +52,12 @@ class MockApiService {
     });
 
     // Simulate payment URL (in real app, this would be from Midtrans)
-    const mockPaymentUrl = `/confirmation?order_id=${orderId}`;
+    const mockCheckoutUrl = `/confirmation?order_id=${orderId}`;
 
     return {
       order_id: orderId,
-      payment_url: mockPaymentUrl,
+      checkout_url: mockCheckoutUrl,
+      reference: `TF${orderId}`,
       status: 'pending_payment'
     };
   }

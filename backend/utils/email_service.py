@@ -8,14 +8,19 @@ logger = logging.getLogger(__name__)
 
 class EmailService:
     def __init__(self):
+        self.enabled = current_app.config.get('EMAIL_ENABLED', False)
         self.api_key = current_app.config.get('SENDGRID_API_KEY')
         self.from_email = current_app.config.get('FROM_EMAIL')
-        self.sg = SendGridAPIClient(api_key=self.api_key) if self.api_key else None
+        self.sg = SendGridAPIClient(api_key=self.api_key) if self.api_key and self.enabled else None
     
     def send_email(self, to_email, subject, html_content, text_content=None):
         """Send email using SendGrid"""
+        if not self.enabled:
+            logger.info(f"Email disabled - would send to {to_email}: {subject}")
+            return True
+        
         if not self.sg:
-            logger.error("SendGrid not configured")
+            logger.error("SendGrid not configured but email is enabled")
             return False
         
         try:

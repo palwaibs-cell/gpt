@@ -16,7 +16,9 @@ class Order(db.Model):
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     payment_status = db.Column(db.String(50), nullable=False, default='pending', index=True)
     invitation_status = db.Column(db.String(50), nullable=False, default='pending', index=True)
-    payment_gateway_ref_id = db.Column(db.String(255), nullable=True, index=True)
+    checkout_url = db.Column(db.String(512), nullable=True)
+    payment_method = db.Column(db.String(64), nullable=True)
+    reference = db.Column(db.String(128), nullable=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -37,7 +39,9 @@ class Order(db.Model):
             'amount': float(self.amount),
             'payment_status': self.payment_status,
             'invitation_status': self.invitation_status,
-            'payment_gateway_ref_id': self.payment_gateway_ref_id,
+            'checkout_url': self.checkout_url,
+            'payment_method': self.payment_method,
+            'reference': self.reference,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -89,5 +93,29 @@ class Package(db.Model):
             'duration': self.duration,
             'description': self.description,
             'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+class AdminAccount(db.Model):
+    __tablename__ = 'admin_accounts'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), nullable=False, unique=True, index=True)
+    password = db.Column(db.String(255), nullable=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    last_used = db.Column(db.DateTime, nullable=True, index=True)
+    failed_attempts = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f'<AdminAccount {self.email}>'
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'email': self.email,
+            'is_active': self.is_active,
+            'last_used': self.last_used.isoformat() if self.last_used else None,
+            'failed_attempts': self.failed_attempts,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

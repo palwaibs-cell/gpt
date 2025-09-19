@@ -72,21 +72,7 @@ def process_invitation_task(self, order_id):
         db.session.commit()
         
         # Get configuration
-        admin_email = current_app.config['CHATGPT_ADMIN_EMAIL']
-        admin_password = current_app.config['CHATGPT_ADMIN_PASSWORD']
-        team_url = current_app.config['CHATGPT_TEAM_URL']
-        
-        if not all([admin_email, admin_password, team_url]):
-            error_msg = "ChatGPT admin credentials or team URL not configured"
-            logger.error(error_msg)
-            
-            # Update order and log
-            order.invitation_status = 'failed'
-            log_entry.status = 'failure'
-            log_entry.error_message = error_msg
-            db.session.commit()
-            
-            return {'success': False, 'error': error_msg}
+        team_url = current_app.config.get('CHATGPT_ADMIN_URL', 'https://chatgpt.com/admin?tab=members')
         
         # Create inviter instance
         inviter = create_inviter(
@@ -95,12 +81,7 @@ def process_invitation_task(self, order_id):
         )
         
         # Process invitation
-        success = inviter.process_invitation(
-            admin_email=admin_email,
-            admin_password=admin_password,
-            team_url=team_url,
-            member_email=order.customer_email
-        )
+        success = inviter.process_invitation(member_email=order.customer_email, team_url=team_url)
         
         if success:
             # Update order status

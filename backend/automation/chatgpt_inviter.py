@@ -398,36 +398,64 @@ class ChatGPTTeamInviter:
             self.logger.error(f"Failed to verify invitation status: {str(e)}")
             return False
     
-    def process_invitation(self, admin_email, admin_password, team_url, member_email):
+    def process_invitation(self, member_email, admin_id=None, admin_email=None, admin_password=None, team_url=None):
         """Complete invitation process"""
         try:
             self.logger.info(f"Starting invitation process for {member_email}")
             
+            # Get admin credentials if not provided
+            if not admin_email or not admin_password:
+                admin_info = get_next_admin()
+                if not admin_info:
+                    raise Exception("No active admin accounts available")
+                
+                admin_id = admin_info['id']
+                admin_email = admin_info['email']
+                admin_password = admin_info['password']
+            
+            # Use default team URL if not provided
+            if not team_url:
+                team_url = "https://chatgpt.com/admin?tab=members"
+            
             # Initialize driver
             if not self._setup_driver():
+                if admin_id:
+                    mark_admin_failure(admin_id)
                 raise Exception("Failed to setup WebDriver")
             
             # Login
             if not self.login(admin_email, admin_password):
+                if admin_id:
+                    mark_admin_failure(admin_id)
                 raise Exception("Login failed")
             
             # Navigate to team management
             if not self.navigate_to_team_management(team_url):
+                if admin_id:
+                    mark_admin_failure(admin_id)
                 raise Exception("Failed to navigate to team management")
             
             # Send invitation
             if not self.invite_member(member_email):
+                if admin_id:
+                    mark_admin_failure(admin_id)
                 raise Exception("Failed to send invitation")
             
             # Verify invitation
             if not self.verify_invitation_status(member_email):
                 self.logger.warning(f"Could not verify invitation status for {member_email}")
             
+            # Mark admin as successful
+            if admin_id:
+                mark_admin_success(admin_id)
+            
             self.logger.info(f"Invitation process completed successfully for {member_email}")
             return True
             
         except Exception as e:
             self.logger.error(f"Invitation process failed: {str(e)}")
+            if admin_id:
+                mark_admin_failure(admin_id)
             self._take_screenshot("process_failed")
             return False
         finally:

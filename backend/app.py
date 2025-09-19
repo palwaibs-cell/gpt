@@ -9,9 +9,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from config import config
-from models import db, Order, InvitationLog, Package
+from models import db, Order, InvitationLog, Package, AdminAccount
 from utils.validators import validate_order_data
-from utils.payment_gateway import get_payment_gateway
+from utils.tripay_client import get_tripay_client
 from utils.email_service import send_payment_confirmation, send_admin_notification
 from tasks import make_celery
 
@@ -35,7 +35,7 @@ def create_app(config_name=None):
     migrate = Migrate(app, db)
     
     # Configure CORS
-    CORS(app, origins=["http://localhost:3000", "http://localhost:5173"])
+    CORS(app, origins=app.config['ALLOWED_ORIGINS'])
     
     # Configure rate limiting
     limiter = Limiter(
@@ -100,24 +100,28 @@ def create_app(config_name=None):
             db.session.flush()  # Get the ID without committing
             
             # Create payment transaction
-            payment_gateway = get_payment_gateway()
+            tripay_client = get_tripay_client()
             payment_data = {
                 'order_id': order_id,
                 'customer_email': validated_data['customer_email'],
-                'full_name': validated_data.get('full_name'),
+                'customer_name': validated_data.get('full_name', 'Customer'),
                 'phone_number': validated_data.get('phone_number'),
-                'package_id': validated_data['package_id']
+                'package_id': validated_data['package_id'],
+                'package_name': package['name'],
+                'amount': package['price']
             }
             
-            payment_result = payment_gateway.create_transaction(payment_data)
+            payment_result = tripay_client.create_transaction(payment_data, method="QRIS")
             
             if not payment_result['success']:
                 db.session.rollback()
-                logger.error(f"Payment gateway error: {payment_result['error']}")
+                logger.error(f"Tripay error: {payment_result['error']}")
                 return jsonify({'error': 'Payment gateway error'}), 500
             
-            # Update order with payment gateway reference
-            order.payment_gateway_ref_id = payment_result['transaction_id']
+            # Update order with Tripay transaction details
+            order.checkout_url = payment_result['checkout_url']
+            order.payment_method = payment_result['payment_method']
+            order.reference = payment_result['reference']
             
             db.session.commit()
             
@@ -125,7 +129,8 @@ def create_app(config_name=None):
             
             return jsonify({
                 'order_id': order_id,
-                'payment_url': payment_result['payment_url'],
+                'checkout_url': payment_result['checkout_url'],
+                'reference': payment_result['reference'],
                 'status': 'pending_payment'
             }), 201
             
@@ -159,40 +164,47 @@ def create_app(config_name=None):
             return jsonify({'error': 'Internal server error'}), 500
     
     @app.route('/api/payment/webhook', methods=['POST'])
-    def payment_webhook():
-        """Handle payment gateway webhook"""
+    def tripay_callback():
+        """Handle Tripay payment callback"""
         try:
             # Get webhook data
             webhook_data = request.get_json()
             if not webhook_data:
-                logger.error("No webhook data received")
+                logger.error("No callback data received from Tripay")
                 return jsonify({'error': 'No data'}), 400
             
             # Verify webhook signature
-            payment_gateway = get_payment_gateway()
+            tripay_client = get_tripay_client()
             
-            order_id = webhook_data.get('order_id')
-            status_code = webhook_data.get('status_code')
-            gross_amount = webhook_data.get('gross_amount')
-            signature_key = webhook_data.get('signature_key')
+            merchant_ref = webhook_data.get('merchant_ref')  # This is our order_id
+            reference = webhook_data.get('reference')
+            status = webhook_data.get('status')
+            total_amount = webhook_data.get('total_amount', webhook_data.get('amount'))
             
-            if not all([order_id, status_code, gross_amount, signature_key]):
-                logger.error("Missing required webhook fields")
+            if not all([merchant_ref, reference, status]):
+                logger.error("Missing required callback fields")
                 return jsonify({'error': 'Missing required fields'}), 400
             
             # Verify signature
-            if not payment_gateway.verify_webhook_signature(order_id, status_code, gross_amount, signature_key):
-                logger.error(f"Invalid webhook signature for order {order_id}")
+            if not tripay_client.verify_callback_signature(webhook_data):
+                logger.error(f"Invalid callback signature for order {merchant_ref}")
                 return jsonify({'error': 'Invalid signature'}), 401
             
             # Find order
-            order = Order.query.filter_by(order_id=order_id).first()
+            order = Order.query.filter_by(order_id=merchant_ref).first()
             if not order:
-                logger.error(f"Order not found: {order_id}")
+                logger.error(f"Order not found: {merchant_ref}")
                 return jsonify({'error': 'Order not found'}), 404
             
-            # Parse payment status
-            new_status = payment_gateway.parse_webhook_status(webhook_data)
+            # Map Tripay status to our internal status
+            status_mapping = {
+                'PAID': 'paid',
+                'EXPIRED': 'expired',
+                'FAILED': 'failed',
+                'UNPAID': 'pending'
+            }
+            
+            new_status = status_mapping.get(status, 'pending')
             old_status = order.payment_status
             
             # Update order status
@@ -219,13 +231,18 @@ def create_app(config_name=None):
             
             db.session.commit()
             
-            logger.info(f"Webhook processed successfully for order {order_id}: {old_status} -> {new_status}")
+            logger.info(f"Tripay callback processed successfully for order {merchant_ref}: {old_status} -> {new_status}")
             
-            return jsonify({'status': 'success'}), 200
+            return jsonify({'success': True}), 200
             
         except Exception as e:
-            logger.error(f"Webhook processing error: {str(e)}")
+            logger.error(f"Tripay callback processing error: {str(e)}")
             return jsonify({'error': 'Internal server error'}), 500
+    
+    @app.route('/callback/tripay', methods=['POST'])
+    def tripay_callback_endpoint():
+        """Tripay callback endpoint with proper path"""
+        return tripay_callback()
     
     @app.route('/api/packages', methods=['GET'])
     def get_packages():

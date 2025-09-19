@@ -10,7 +10,8 @@ export interface CreateOrderRequest {
 
 export interface CreateOrderResponse {
   order_id: string;
-  payment_url: string;
+  checkout_url: string;
+  reference: string;
   status: string;
 }
 
