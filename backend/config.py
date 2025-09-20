@@ -17,6 +17,8 @@ class Config:
     TRIPAY_MERCHANT_CODE = os.environ.get('TRIPAY_MERCHANT_CODE')
     TRIPAY_PRIVATE_KEY = os.environ.get('TRIPAY_PRIVATE_KEY')
     TRIPAY_IS_PRODUCTION = os.environ.get('TRIPAY_IS_PRODUCTION', 'false').lower() == 'true'
+    TRIPAY_BASE_URL = os.environ.get('TRIPAY_BASE_URL', 'https://tripay.co.id/api')
+    TRIPAY_CALLBACK_URL = os.environ.get('TRIPAY_CALLBACK_URL')
     
     # API Configuration
     API_BASE_URL = os.environ.get('API_BASE_URL', 'http://localhost:5000')
@@ -68,6 +70,9 @@ class Config:
     
     # Rate Limiting
     RATELIMIT_STORAGE_URL = os.environ.get('RATE_LIMIT_STORAGE_URL') or 'redis://localhost:6379/1'
+    
+    # Celery Configuration
+    ENABLE_CELERY = os.environ.get('ENABLE_CELERY', 'false').lower() == 'true'
     
     # Package Configuration
     PACKAGES = {

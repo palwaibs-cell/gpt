@@ -39,6 +39,31 @@ Sistem order otomatis untuk ChatGPT Plus dengan integrasi payment gateway dan ot
 
 ## 🔧 Installation & Setup
 
+### **0. Environment Variables Setup**
+
+Create `backend/.env` file with Tripay credentials:
+
+```env
+# Tripay Payment Gateway
+TRIPAY_API_KEY=VI4hfWUhlfX70OZIjiae18pATyHOvNq0WjvBT6ej
+TRIPAY_PRIVATE_KEY=2PW1G-zUdkm-EGiwn-femXJ-yEtIO
+TRIPAY_MERCHANT_CODE=T45484
+TRIPAY_IS_PRODUCTION=true
+
+# API Configuration
+API_BASE_URL=http://151.240.0.79
+FRONTEND_URL=https://aksesgptmurah.tech
+
+# Database
+DATABASE_URL=mysql+pymysql://gptuser:GptUser123!@127.0.0.1/gptapp_db
+
+# Email (disabled for now)
+EMAIL_ENABLED=false
+
+# Celery (optional)
+ENABLE_CELERY=false
+```
+
 ### 1. Clone Repository
 
 ```bash
@@ -75,9 +100,7 @@ nano .env
 pip install -r requirements.txt
 
 # Initialize database
-flask db init
-flask db migrate -m "Initial migration"
-flask db upgrade
+python init_db.py
 
 # Start Flask development server
 python app.py
@@ -292,24 +315,31 @@ SELENIUM_HEADLESS=false
 curl -X POST http://151.240.0.79/api/orders \
   -H "Content-Type: application/json" \
   -d '{
+    "name": "Test User",
+    "phone": "08123456789", 
     "customer_email": "test@example.com",
     "package_id": "chatgpt_plus_1_month",
-    "full_name": "Test User",
-    "phone_number": "+6281234567890"
+    "payment_method": "QRIS"
   }'
 ```
 
-### Test Callback (for testing)
+### Test Tripay Callback (for testing)
 ```bash
 curl -X POST http://151.240.0.79/callback/tripay \
   -H "Content-Type: application/json" \
   -d '{
-    "merchant_ref": "ORD00000001",
-    "reference": "TF123456789",
+    "merchant_ref": "INV-1234567890",
+    "reference": "T123456789",
     "status": "PAID",
     "total_amount": 25000,
-    "signature": "calculated_signature"
+    "signature": "calculated_hmac_signature"
   }'
+```
+
+### Test Payment Channels
+```bash
+curl -H "Authorization: Bearer VI4hfWUhlfX70OZIjiae18pATyHOvNq0WjvBT6ej" \
+  https://tripay.co.id/api/merchant/payment-channel
 ```
 
 ## 📞 Support

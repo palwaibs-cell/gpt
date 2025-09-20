@@ -2,6 +2,7 @@ import os
 import logging
 from datetime import datetime, timedelta
 from celery import Celery
+from celery import shared_task
 from flask import current_app
 from models import db, Order, InvitationLog
 from automation.chatgpt_inviter import create_inviter
@@ -33,7 +34,7 @@ def make_celery(app):
 # This will be initialized in app.py
 celery = None
 
-@celery.task(bind=True, max_retries=3, default_retry_delay=300)
+@shared_task(bind=True, max_retries=3, default_retry_delay=300)
 def process_invitation_task(self, order_id):
     """
     Celery task to process ChatGPT invitation
@@ -172,7 +173,7 @@ def process_invitation_task(self, order_id):
         
         return {'success': False, 'error': str(e)}
 
-@celery.task
+@shared_task
 def cleanup_expired_orders():
     """Clean up expired orders and update their status"""
     try:
@@ -200,7 +201,7 @@ def cleanup_expired_orders():
         logger.error(f"Error during cleanup: {str(e)}")
         return {'success': False, 'error': str(e)}
 
-@celery.task
+@shared_task
 def retry_failed_invitations():
     """Retry failed invitations that might be recoverable"""
     try:
@@ -233,7 +234,33 @@ def retry_failed_invitations():
         return {'success': False, 'error': str(e)}
 
 # Periodic tasks configuration
-@celery.on_after_configure.connect
+def setup_periodic_tasks(sender, **kwargs):
+    """Setup periodic tasks - only if Celery is enabled"""
+    if not current_app.config.get('ENABLE_CELERY', False):
+        return
+        
+    # Cleanup expired orders every hour
+    sender.add_periodic_task(
+        3600.0,  # 1 hour
+        cleanup_expired_orders.s(),
+        name='cleanup expired orders'
+    )
+    
+    # Retry failed invitations every 2 hours
+    sender.add_periodic_task(
+        7200.0,  # 2 hours
+        retry_failed_invitations.s(),
+        name='retry failed invitations'
+    )
+
+# Only register if Celery is enabled
+try:
+    from flask import current_app
+    if current_app and current_app.config.get('ENABLE_CELERY', False):
+        from celery.signals import after_configure
+        after_configure.connect(setup_periodic_tasks)
+except:
+    pass
 def setup_periodic_tasks(sender, **kwargs):
     """Setup periodic tasks"""
     

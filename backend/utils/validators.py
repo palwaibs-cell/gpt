@@ -85,8 +85,18 @@ def validate_order_data(data):
         else:
             data['phone_number'] = result
     
+    # Handle alternative field names
+    if 'phone' in data and not data.get('phone_number'):
+        data['phone_number'] = data['phone']
+    
+    if 'name' in data and not data.get('full_name'):
+        data['full_name'] = data['name']
+    
     # Sanitize optional text fields
     if 'full_name' in data:
         data['full_name'] = sanitize_input(data['full_name'])
+    
+    if 'name' in data:
+        data['name'] = sanitize_input(data['name'])
     
     return len(errors) == 0, errors, data

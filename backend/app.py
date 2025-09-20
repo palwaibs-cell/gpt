@@ -13,7 +13,6 @@ from models import db, Order, InvitationLog, Package, AdminAccount
 from utils.validators import validate_order_data
 from utils.tripay_client import get_tripay_client
 from utils.email_service import send_payment_confirmation, send_admin_notification
-from tasks import make_celery
 
 # Configure logging
 logging.basicConfig(
@@ -38,17 +37,18 @@ def create_app(config_name=None):
     CORS(app, origins=app.config['ALLOWED_ORIGINS'])
     
     # Configure rate limiting
-    limiter = Limiter(
-        app,
-        key_func=get_remote_address,
-        storage_uri=app.config.get('RATELIMIT_STORAGE_URL')
-    )
+    limiter = Limiter(key_func=get_remote_address)
+    limiter.init_app(app)
     
-    # Initialize Celery
-    celery = make_celery(app)
+    # Initialize Celery (optional)
+    celery = None
+    if app.config.get('ENABLE_CELERY', False):
+        try:
+            from tasks import make_celery
+            celery = make_celery(app)
+        except Exception as e:
+            logger.warning(f"Celery initialization failed: {str(e)}")
     
-    # Import tasks after celery initialization
-    from tasks import process_invitation_task
     
     @app.route('/health', methods=['GET'])
     def health_check():
@@ -74,8 +74,11 @@ def create_app(config_name=None):
             if not is_valid:
                 return jsonify({'error': 'Validation failed', 'details': errors}), 400
             
-            # Generate unique order ID
-            order_id = f"ORD{uuid.uuid4().hex[:8].upper()}"
+            # Generate unique merchant_ref if not provided
+            merchant_ref = validated_data.get('merchant_ref')
+            if not merchant_ref:
+                import time
+                merchant_ref = f"INV-{int(time.time())}"
             
             # Get package information
             packages = app.config['PACKAGES']
@@ -84,14 +87,20 @@ def create_app(config_name=None):
             if not package:
                 return jsonify({'error': 'Invalid package_id'}), 400
             
+            # Get amount from server-side package (security)
+            amount = package['price']
+            
+            # Get payment method
+            payment_method = validated_data.get('payment_method', 'QRIS')
+            
             # Create order record
             order = Order(
-                order_id=order_id,
+                order_id=merchant_ref,
                 customer_email=validated_data['customer_email'],
-                full_name=validated_data.get('full_name'),
+                full_name=validated_data.get('full_name', validated_data.get('name')),
                 phone_number=validated_data.get('phone_number'),
                 package_id=validated_data['package_id'],
-                amount=package['price'],
+                amount=amount,
                 payment_status='pending',
                 invitation_status='pending'
             )
@@ -102,35 +111,42 @@ def create_app(config_name=None):
             # Create payment transaction
             tripay_client = get_tripay_client()
             payment_data = {
-                'order_id': order_id,
+                'merchant_ref': merchant_ref,
+                'amount': amount,
                 'customer_email': validated_data['customer_email'],
-                'customer_name': validated_data.get('full_name', 'Customer'),
-                'phone_number': validated_data.get('phone_number'),
+                'customer_name': validated_data.get('full_name', validated_data.get('name', 'Customer')),
+                'phone_number': validated_data.get('phone_number', validated_data.get('phone', '')),
                 'package_id': validated_data['package_id'],
-                'package_name': package['name'],
-                'amount': package['price']
+                'package_name': package['name']
             }
             
-            payment_result = tripay_client.create_transaction(payment_data, method="QRIS")
+            payment_result = tripay_client.create_transaction(payment_data, method=payment_method)
             
-            if not payment_result['success']:
+            if not payment_result.get('success', False):
                 db.session.rollback()
-                logger.error(f"Tripay error: {payment_result['error']}")
-                return jsonify({'error': 'Payment gateway error'}), 500
+                logger.error(f"Tripay error: {payment_result.get('error', 'Unknown error')}")
+                return jsonify({
+                    'error': payment_result.get('error', 'Payment gateway error'),
+                    'details': payment_result.get('details', {})
+                }), 500
             
             # Update order with Tripay transaction details
-            order.checkout_url = payment_result['checkout_url']
-            order.payment_method = payment_result['payment_method']
-            order.reference = payment_result['reference']
+            order.checkout_url = payment_result.get('checkout_url')
+            order.payment_method = payment_result.get('payment_method')
+            order.reference = payment_result.get('reference')
             
             db.session.commit()
             
-            logger.info(f"Order created successfully: {order_id}")
+            logger.info(f"Order created successfully: {merchant_ref}")
             
             return jsonify({
-                'order_id': order_id,
-                'checkout_url': payment_result['checkout_url'],
-                'reference': payment_result['reference'],
+                'success': True,
+                'order_id': merchant_ref,
+                'reference': payment_result.get('reference'),
+                'checkout_url': payment_result.get('checkout_url'),
+                'qr_string': payment_result.get('qr_string'),
+                'payment_method': payment_result.get('payment_method'),
+                'amount': amount,
                 'status': 'pending_payment'
             }), 201
             
@@ -173,10 +189,14 @@ def create_app(config_name=None):
                 logger.error("No callback data received from Tripay")
                 return jsonify({'error': 'No data'}), 400
             
+            # Log callback data (without signature for security)
+            safe_data = {k: v for k, v in webhook_data.items() if k != 'signature'}
+            logger.info(f"Tripay callback received: {safe_data}")
+            
             # Verify webhook signature
             tripay_client = get_tripay_client()
             
-            merchant_ref = webhook_data.get('merchant_ref')  # This is our order_id
+            merchant_ref = webhook_data.get('merchant_ref')
             reference = webhook_data.get('reference')
             status = webhook_data.get('status')
             total_amount = webhook_data.get('total_amount', webhook_data.get('amount'))
@@ -188,6 +208,7 @@ def create_app(config_name=None):
             # Verify signature
             if not tripay_client.verify_callback_signature(webhook_data):
                 logger.error(f"Invalid callback signature for order {merchant_ref}")
+                logger.error(f"Callback body: {safe_data}")
                 return jsonify({'error': 'Invalid signature'}), 401
             
             # Find order
@@ -222,12 +243,16 @@ def create_app(config_name=None):
                     logger.error(f"Failed to send payment confirmation: {str(e)}")
                 
                 # Trigger invitation task
-                try:
-                    process_invitation_task.delay(order.id)
-                    logger.info(f"Invitation task queued for order {order_id}")
-                except Exception as e:
-                    logger.error(f"Failed to queue invitation task: {str(e)}")
-                    order.invitation_status = 'failed'
+                if celery:
+                    try:
+                        from tasks import process_invitation_task
+                        process_invitation_task.delay(order.id)
+                        logger.info(f"Invitation task queued for order {merchant_ref}")
+                    except Exception as e:
+                        logger.error(f"Failed to queue invitation task: {str(e)}")
+                        order.invitation_status = 'failed'
+                else:
+                    logger.info(f"Celery disabled, invitation task not queued for order {merchant_ref}")
             
             db.session.commit()
             
