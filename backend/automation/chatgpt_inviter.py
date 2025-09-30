@@ -44,9 +44,7 @@ class ChatGPTTeamInviter:
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--disable-extensions')
             chrome_options.add_argument('--disable-plugins')
-            chrome_options.add_argument('--disable-images')
-            chrome_options.add_argument('--disable-javascript')  # Remove if ChatGPT requires JS
-            
+
             # User agent to appear more human-like
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             

@@ -261,19 +261,3 @@ try:
         after_configure.connect(setup_periodic_tasks)
 except:
     pass
-def setup_periodic_tasks(sender, **kwargs):
-    """Setup periodic tasks"""
-    
-    # Cleanup expired orders every hour
-    sender.add_periodic_task(
-        3600.0,  # 1 hour
-        cleanup_expired_orders.s(),
-        name='cleanup expired orders'
-    )
-    
-    # Retry failed invitations every 2 hours
-    sender.add_periodic_task(
-        7200.0,  # 2 hours
-        retry_failed_invitations.s(),
-        name='retry failed invitations'
-    )

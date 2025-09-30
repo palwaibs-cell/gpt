@@ -8,7 +8,7 @@ interface DemoControlsProps {
 }
 
 const DemoControls: React.FC<DemoControlsProps> = ({ orderId, onRefresh }) => {
-  const USE_MOCK_API = true; // Force demo mode for preview
+  const USE_MOCK_API = false; // Production mode - no demo controls
 
   if (!USE_MOCK_API || !orderId) {
     return null;

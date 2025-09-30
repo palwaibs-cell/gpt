@@ -1,5 +1,5 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-const USE_MOCK_API = true; // Force mock API for preview
+const USE_MOCK_API = false; // Production mode - use real backend
 
 export interface CreateOrderRequest {
   customer_email: string;

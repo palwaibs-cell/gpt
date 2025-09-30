@@ -85,12 +85,17 @@ const OrderForm: React.FC = () => {
       };
       
       const response = await apiService.createOrder(orderData);
-      
+
       dispatch({ type: 'SET_CURRENT_ORDER', payload: response });
       dispatch({ type: 'UPDATE_ORDER_DATA', payload: orderData });
-      
-      // Navigate to confirmation page with order ID
-      navigate(`/confirmation?order_id=${response.order_id}`);
+
+      // Redirect to Tripay checkout page if checkout_url exists
+      if (response.checkout_url) {
+        window.location.href = response.checkout_url;
+      } else {
+        // Fallback to confirmation page
+        navigate(`/confirmation?order_id=${response.order_id}`);
+      }
       
     } catch (error) {
       dispatch({ 
