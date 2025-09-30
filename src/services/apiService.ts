@@ -1,5 +1,5 @@
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://pwnzbpkprtvvwrxveixn.supabase.co';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB3bnpicGtwcnR2dndyeHZlaXhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkyMjY2OTEsImV4cCI6MjA3NDgwMjY5MX0.XN5F7FZrITcSMp95VIVHdELDF_A5oHvl95LC72BH-lo';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const USE_MOCK_API = false;
 const USE_EDGE_FUNCTIONS = true; // Use Supabase Edge Functions instead of Python backend
