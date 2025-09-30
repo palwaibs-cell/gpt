@@ -29,12 +29,12 @@ Website telah diubah dari demo mode ke production mode.
 Untuk menerima callback dari Tripay, Anda perlu menambahkan IP server backend ke whitelist Tripay:
 
 ### IP yang Perlu Di-Whitelist:
-**Server backend Anda harus mendapatkan IP public yang nanti di-whitelist di dashboard Tripay.**
 
-Cara mendapatkan IP server:
-```bash
-curl ifconfig.me
-```
+**IP Server Backend (Current):**
+- IPv4: `34.34.229.15`
+- IPv6: `2600:1900:0:2e01::701`
+
+**⚠️ GUNAKAN IPv4 (34.34.229.15) untuk whitelist di Tripay Dashboard**
 
 ### Cara Whitelist IP di Tripay:
 1. Login ke dashboard Tripay: https://tripay.co.id/member
