@@ -103,7 +103,54 @@ class ApiService {
     if (USE_MOCK_API) {
       return mockApiService.getOrderStatus(orderId);
     }
-    
+
+    if (USE_EDGE_FUNCTIONS && SUPABASE_URL && SUPABASE_ANON_KEY) {
+      try {
+        const response = await fetch(
+          `${SUPABASE_URL}/rest/v1/orders?order_id=eq.${orderId}&select=order_id,payment_status,invitation_status`,
+          {
+            headers: {
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`HTTP Error: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data || data.length === 0) {
+          throw new Error('Order not found');
+        }
+
+        const order = data[0];
+
+        let message = '';
+        if (order.payment_status === 'paid' && order.invitation_status === 'sent') {
+          message = 'Pembayaran berhasil dan undangan telah dikirim!';
+        } else if (order.payment_status === 'paid') {
+          message = 'Pembayaran berhasil! Undangan sedang diproses.';
+        } else if (order.payment_status === 'pending') {
+          message = 'Menunggu pembayaran.';
+        } else {
+          message = 'Status pembayaran: ' + order.payment_status;
+        }
+
+        return {
+          order_id: order.order_id,
+          payment_status: order.payment_status,
+          invitation_status: order.invitation_status,
+          message
+        };
+      } catch (error) {
+        console.error('Error fetching order status:', error);
+        throw error;
+      }
+    }
+
     return this.request<OrderStatusResponse>(`/api/orders/${orderId}/status`);
   }
 }

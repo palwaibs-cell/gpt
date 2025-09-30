@@ -17,9 +17,15 @@ export default defineConfig({
   },
   build: {
     target: 'es2015',
-    cssTarget: 'chrome61'
+    cssTarget: 'chrome61',
+    rollupOptions: {
+      output: {
+        manualChunks: undefined
+      }
+    }
   },
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  publicDir: 'public'
 });
