@@ -7,10 +7,15 @@ load_dotenv()
 class Config:
     # Flask Configuration
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
-    
-    # Database Configuration
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'mysql+pymysql://gptuser:GptUser123!@127.0.0.1/gptapp_db'
+
+    # Database Configuration (Supabase PostgreSQL)
+    # Supabase provides DATABASE_URL automatically, or use SUPABASE_DB_URL
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL') or 'postgresql://postgres:postgres@localhost:5432/postgres'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+        'pool_recycle': 300,
+    }
     
     # Payment Gateway (Tripay)
     TRIPAY_API_KEY = os.environ.get('TRIPAY_API_KEY')
