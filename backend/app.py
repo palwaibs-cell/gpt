@@ -33,8 +33,12 @@ def create_app(config_name=None):
     db.init_app(app)
     migrate = Migrate(app, db)
     
-    # Configure CORS
-    CORS(app, origins=app.config['ALLOWED_ORIGINS'])
+    # Configure CORS with all necessary headers
+    CORS(app,
+         origins=app.config['ALLOWED_ORIGINS'],
+         supports_credentials=True,
+         allow_headers=['Content-Type', 'Authorization'],
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
     
     # Configure rate limiting
     limiter = Limiter(key_func=get_remote_address)
