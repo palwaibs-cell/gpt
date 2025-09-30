@@ -157,6 +157,16 @@ def create_app(config_name=None):
         except Exception as e:
             db.session.rollback()
             logger.error(f"Error creating order: {str(e)}")
+            logger.exception("Full traceback:")
+
+            # In development, return detailed error
+            if app.config.get('DEBUG'):
+                return jsonify({
+                    'error': 'Internal server error',
+                    'details': str(e),
+                    'type': type(e).__name__
+                }), 500
+
             return jsonify({'error': 'Internal server error'}), 500
     
     @app.route('/api/orders/<order_id>/status', methods=['GET'])
