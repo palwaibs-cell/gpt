@@ -1,5 +1,8 @@
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-const USE_MOCK_API = false; // Production mode - use real backend
+const USE_MOCK_API = false;
+const USE_EDGE_FUNCTIONS = true; // Use Supabase Edge Functions instead of Python backend
 
 export interface CreateOrderRequest {
   customer_email: string;
@@ -64,7 +67,32 @@ class ApiService {
     if (USE_MOCK_API) {
       return mockApiService.createOrder(orderData);
     }
-    
+
+    if (USE_EDGE_FUNCTIONS && SUPABASE_URL && SUPABASE_ANON_KEY) {
+      const edgeUrl = `${SUPABASE_URL}/functions/v1/create-order`;
+
+      try {
+        const response = await fetch(edgeUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify(orderData),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `HTTP Error: ${response.status}`);
+        }
+
+        return await response.json();
+      } catch (error) {
+        console.error('Edge function error:', error);
+        throw error;
+      }
+    }
+
     return this.request<CreateOrderResponse>('/api/orders', {
       method: 'POST',
       body: JSON.stringify(orderData),
